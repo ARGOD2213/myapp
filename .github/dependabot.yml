@@ -8,6 +8,12 @@ updates:
     directory: "/frontend"
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    groups:
+      toolchain:           # these must move together: bump them in one reviewed PR, not individually
+        patterns: ["vite", "vitest", "@vitejs/*", "typescript", "react", "react-dom", "@types/react*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]   # majors are deliberate tickets, not auto-merges
   - package-ecosystem: github-actions
     directory: "/"
     schedule: { interval: monthly }

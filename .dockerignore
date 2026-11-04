@@ -1,0 +1,10 @@
+target
+.git
+.github
+frontend
+infra
+docs
+data
+_backups
+*.log
+.env

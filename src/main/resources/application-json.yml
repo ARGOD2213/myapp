@@ -1,0 +1,7 @@
+# Activate with --spring.profiles.active=json for machine-readable (ECS JSON) logs.
+logging:
+  structured:
+    format:
+      console: ecs
+  pattern:
+    console:

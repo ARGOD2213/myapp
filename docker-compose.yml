@@ -1,0 +1,38 @@
+# Full local stack in containers:  docker compose up --build
+# Needs CONNECTONE_DB_PASSWORD in your shell or a local .env (never committed).
+# (Day-to-day development normally uses scripts/start-backend.ps1 + npm run dev against the dedicated containers.)
+name: connectone-stack
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: connectone_dev
+      POSTGRES_USER: connectone_app
+      POSTGRES_PASSWORD: ${CONNECTONE_DB_PASSWORD:?set CONNECTONE_DB_PASSWORD}
+    ports: ["127.0.0.1:5435:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U connectone_app -d connectone_dev"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+  backend:
+    build: .
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/connectone_dev
+      CONNECTONE_DB_PASSWORD: ${CONNECTONE_DB_PASSWORD}
+      CONNECTONE_JWT_SECRET: ${CONNECTONE_JWT_SECRET:-local-compose-only-secret-change-me-32-chars}
+      CONNECTONE_CACHE_TYPE: redis
+      CONNECTONE_REDIS_HOST: redis
+      CONNECTONE_REDIS_PORT: "6379"
+    ports: ["127.0.0.1:18081:18080"]
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports: ["127.0.0.1:8081:80"]
+volumes:
+  pgdata:

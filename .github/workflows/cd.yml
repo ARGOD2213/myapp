@@ -1,0 +1,96 @@
+name: CD
+# main -> build once -> deploy to STAGING automatically -> PRODUCTION after manual approval.
+# Uses GitHub Environments "staging" and "production" (add required reviewers to "production").
+# Repository variables: AWS_REGION, ECR_BACKEND_REPO, ECS_CLUSTER, ECS_SERVICE_STAGING, ECS_SERVICE_PROD,
+#   S3_BUCKET_STAGING, S3_BUCKET_PROD, CF_DISTRIBUTION_STAGING, CF_DISTRIBUTION_PROD
+# Repository secret: AWS_ROLE_ARN (OIDC role; no static AWS keys). See docs/DEVOPS_AWS.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - id: meta
+        run: echo "image=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_BACKEND_REPO }}:${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: docker build -t "${{ steps.meta.outputs.image }}" . && docker push "${{ steps.meta.outputs.image }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+  staging:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Roll the backend service to the new image
+        run: |
+          TD=$(aws ecs describe-services --cluster "${{ vars.ECS_CLUSTER }}" --services "${{ vars.ECS_SERVICE_STAGING }}" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$TD" --query taskDefinition \
+            | jq --arg IMG "${{ needs.build.outputs.image }}" '.containerDefinitions[0].image=$IMG | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' > td.json
+          NEW=$(aws ecs register-task-definition --cli-input-json file://td.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "${{ vars.ECS_CLUSTER }}" --service "${{ vars.ECS_SERVICE_STAGING }}" --task-definition "$NEW"
+          aws ecs wait services-stable --cluster "${{ vars.ECS_CLUSTER }}" --services "${{ vars.ECS_SERVICE_STAGING }}"
+      - name: Publish the frontend
+        run: |
+          aws s3 sync dist "s3://${{ vars.S3_BUCKET_STAGING }}" --delete
+          aws cloudfront create-invalidation --distribution-id "${{ vars.CF_DISTRIBUTION_STAGING }}" --paths "/*"
+
+  production:
+    needs: [build, staging]
+    runs-on: ubuntu-latest
+    environment: production # required reviewers on this environment = the manual approval gate
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Roll the backend service (rollback = re-run this workflow for an older commit)
+        run: |
+          TD=$(aws ecs describe-services --cluster "${{ vars.ECS_CLUSTER }}" --services "${{ vars.ECS_SERVICE_PROD }}" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$TD" --query taskDefinition \
+            | jq --arg IMG "${{ needs.build.outputs.image }}" '.containerDefinitions[0].image=$IMG | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' > td.json
+          NEW=$(aws ecs register-task-definition --cli-input-json file://td.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "${{ vars.ECS_CLUSTER }}" --service "${{ vars.ECS_SERVICE_PROD }}" --task-definition "$NEW"
+          aws ecs wait services-stable --cluster "${{ vars.ECS_CLUSTER }}" --services "${{ vars.ECS_SERVICE_PROD }}"
+      - run: |
+          aws s3 sync dist "s3://${{ vars.S3_BUCKET_PROD }}" --delete
+          aws cloudfront create-invalidation --distribution-id "${{ vars.CF_DISTRIBUTION_PROD }}" --paths "/*"

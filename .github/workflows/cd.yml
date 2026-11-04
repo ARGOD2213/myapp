@@ -33,7 +33,7 @@ jobs:
       - id: meta
         run: echo "image=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_BACKEND_REPO }}:${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
       - run: docker build -t "${{ steps.meta.outputs.image }}" . && docker push "${{ steps.meta.outputs.image }}"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm

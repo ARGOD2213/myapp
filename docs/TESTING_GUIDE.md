@@ -14,6 +14,15 @@
 Total backend: **27 tests, 0 failures** (`scripts\test.ps1`). **There are no H2 tests any more**: H2 hid three PostgreSQL-only
 production bugs (TAKEOVER_AUDIT F1/F2), so the suite runs on the real engine.
 
+## Microservice tests (added with the notification-service extraction)
+| Test | Proves |
+|---|---|
+| `core-service` `OutboxTests` | event rolled back with its transaction; relay publishes with customer key + headers and marks rows; Kafka outage leaves rows unpublished and they are sent after recovery |
+| `notification-service` `NotificationServiceTests` | event contract parsing (tolerates new fields, rejects missing ones); duplicate and 8-way concurrent redelivery create one row; customers see only their own notifications; JWT checks (missing/expired/tampered/wrong role) |
+| `notification-service` `KafkaRoundTripTests` | real (in-JVM KRaft) Kafka: stored, redelivery deduplicated, foreign event types ignored, poison message lands on `.DLT` |
+| `scripts\smoke-events.mjs` | live pipeline through the gateway: recharge -> pay -> Kafka -> notification-service (measured 1.2 s) |
+Run one service: `.\scripts	est.ps1 -Service notification-service`. The notification tests use database `connectone_notifications_test`.
+
 ## Test database safety
 
 - Tests use `connectone_test` (same container, separate database). `TestDatabaseConfiguration` **drops and re-migrates the whole schema**

@@ -1,6 +1,6 @@
 # ConnectOne engineering backlog
 
-64 tickets in six levels. Ticket text describes **symptoms and expected behaviour only**: root causes and solutions are intentionally absent
+75 tickets in seven levels. Ticket text describes **symptoms and expected behaviour only**: root causes and solutions are intentionally absent
 (see `../_ANSWER_KEY.md`, to be opened only after you have submitted your own report). Work in order within a level; Level N assumes Level N-1 skills.
 Reproduce against the large dataset (`scripts/seed-dataset.ps1 -Reset`). Submit one engineering report per ticket (template in `../ENGINEERING_EXERCISES.md`).
 
@@ -70,6 +70,17 @@ Reproduce against the large dataset (`scripts/seed-dataset.ps1 -Reset`). Submit 
 | CO-0062 | 6 | Own Notifications and decide the async architecture | P2 | Hard | Notifications |
 | CO-0063 | 6 | Incident drill: customers charged twice | P1 | Hard | Payments |
 | CO-0064 | 6 | Introduce API v2 for payments without breaking v1 | P3 | Hard | Platform |
+| CO-0065 | 7 | Extract the support/ticketing module into its own service | P2 | Hard | Platform |
+| CO-0066 | 7 | Rate limiting at the gateway | P2 | Medium | Platform |
+| CO-0067 | 7 | Circuit breaker and timeouts between gateway and services | P2 | Medium | Platform |
+| CO-0068 | 7 | Distributed tracing across gateway, core and notification-service | P3 | Medium | Observability |
+| CO-0069 | 7 | Saga: payment, booking and notification consistency | P1 | Hard | Payments |
+| CO-0070 | 7 | Replace the shared JWT secret with asymmetric signing | P1 | Hard | Security |
+| CO-0071 | 7 | Flaky Redis cache test in the full suite | P3 | Medium | Testing |
+| CO-0072 | 7 | Outbox relay at scale | P3 | Hard | Platform |
+| CO-0073 | 7 | Run the platform on a local Kubernetes cluster | P2 | Hard | DevOps |
+| CO-0074 | 7 | Update the AWS Terraform and CD pipeline for three services | P2 | Hard | DevOps |
+| CO-0075 | 7 | Blue/green deployment rehearsal for core-service | P3 | Medium | DevOps |
 
 
 ## Level 1 — System familiarisation
@@ -1301,3 +1312,226 @@ Reproduce against the large dataset (`scripts/seed-dataset.ps1 -Reset`). Submit 
 - Deprecation/communication plan
 
 **Scope.** Controllers, DTOs, frontend, docs.
+
+
+## Level 7 — Microservices, platform and DevOps
+
+### CO-0065 — Extract the support/ticketing module into its own service
+
+**Priority:** P2 · **Difficulty:** Hard · **Module:** Platform · **Level:** 7
+
+**Business context.** Support runs on its own cadence and team; it should deploy and scale independently of payments.
+
+**Problem statement.** Support tickets share a database, transactions and code with the rest of core-service. Releasing a ticket change means redeploying payments.
+
+**Expected behaviour.** A support-service with its own database, API behind the gateway, and events for the integration points, delivered with no downtime for existing clients.
+
+**Acceptance criteria**
+
+- Design note: boundary, data ownership, which events cross it (follow docs/MICROSERVICES.md checklist)
+- Own database + Flyway; scripted, re-runnable data migration
+- Gateway route switch with the old path kept until verified
+- Customer-id / agent-id references have no cross-database foreign keys; say how integrity is protected instead
+- Contract tests on both sides; compose + CI updated
+- Old code and legacy tables removed in a separate, later migration
+
+**Scope.** New module, gateway, compose, CI, docs. Tickets assigned to agents need agent identity: decide how (claims vs lookup).
+
+### CO-0066 — Rate limiting at the gateway
+
+**Priority:** P2 · **Difficulty:** Medium · **Module:** Platform · **Level:** 7
+
+**Business context.** A client bug and a bot both hammered login and recharge endpoints last week.
+
+**Problem statement.** The gateway forwards every request without any limit.
+
+**Expected behaviour.** Per-client (and per-user for authenticated calls) rate limits with correct 429 responses, configurable per route, observable in metrics.
+
+**Acceptance criteria**
+
+- Strict limit on /auth/** and a looser one on the rest
+- 429 with Retry-After and the standard JSON error body incl. correlation id
+- State store choice justified (in-memory vs Redis) and consequences for several gateway instances
+- Test that proves the limit and that normal use is unaffected
+- Metric for rejected requests
+
+**Scope.** api-gateway, docs, tests.
+
+### CO-0067 — Circuit breaker and timeouts between gateway and services
+
+**Priority:** P2 · **Difficulty:** Medium · **Module:** Platform · **Level:** 7
+
+**Business context.** When notification-service is down the notifications screen hangs for several seconds before failing.
+
+**Problem statement.** Calls to a dead or slow downstream service are retried by the browser and tie up gateway threads.
+
+**Expected behaviour.** Fail fast with a clear response while a service is unhealthy, recover automatically, and keep unrelated routes unaffected.
+
+**Acceptance criteria**
+
+- Reproduce the slow failure (docker stop) and record the latency before/after
+- Circuit breaker + fallback response designed per route (what should the UI see?)
+- Thread/connection usage of the gateway measured during the outage
+- Retry policy only on idempotent methods; explain why
+- Documented in the playbook with the fault-injection steps
+
+**Scope.** api-gateway, frontend error state.
+
+### CO-0068 — Distributed tracing across gateway, core and notification-service
+
+**Priority:** P3 · **Difficulty:** Medium · **Module:** Observability · **Level:** 7
+
+**Business context.** The correlation id helps with logs but nobody can see where time is spent across services.
+
+**Problem statement.** There are no spans; latency in the event pipeline is invisible.
+
+**Expected behaviour.** Traces covering HTTP hops and the Kafka hop, visible in a local trace UI, with the correlation id linked to the trace id.
+
+**Acceptance criteria**
+
+- OpenTelemetry/Micrometer tracing wired in all three services
+- Trace context propagated through the Kafka record headers (producer and consumer)
+- A local trace backend added to the observability compose profile
+- Screenshot-level description of one recharge trace in your report
+- Overhead measured
+
+**Scope.** All services, compose, docs.
+
+### CO-0069 — Saga: payment, booking and notification consistency
+
+**Priority:** P1 · **Difficulty:** Hard · **Module:** Payments · **Level:** 7
+
+**Business context.** Once booking and payment live in different services a failure between them leaves money taken without a seat, or a seat without payment.
+
+**Problem statement.** Today a single database transaction hides this problem; after extraction it becomes real.
+
+**Expected behaviour.** A choreographed or orchestrated saga for 'book a seat and pay' with compensations for every failure point.
+
+**Acceptance criteria**
+
+- State machine for the saga incl. every failure and timeout
+- Idempotent steps and idempotent compensations
+- Failure injection tests (service down between steps, duplicate events, out-of-order events)
+- Operator view of stuck sagas
+- Decision record: choreography vs orchestration for this flow
+
+**Scope.** Design first; implement across payment/booking modules and events.
+
+### CO-0070 — Replace the shared JWT secret with asymmetric signing
+
+**Priority:** P1 · **Difficulty:** Hard · **Module:** Security · **Level:** 7
+
+**Business context.** Every service holding the signing secret can mint tokens, and a token revoked at logout stays valid on notification-service until it expires.
+
+**Problem statement.** All services share one HS256 secret and the notification service cannot check revocation.
+
+**Expected behaviour.** Only the identity side can sign; other services verify with public keys; revocation behaviour is explicit and tested.
+
+**Acceptance criteria**
+
+- RS256/EdDSA with a JWKS endpoint and key rotation story
+- Verification library code shared or duplicated deliberately (justify)
+- Maximum exposure window for a revoked token stated and tested; mitigation chosen (short expiry, introspection, deny-list)
+- Rollout plan that does not log everyone out
+- Update of the local, compose and Terraform configuration
+
+**Scope.** core-service, notification-service, gateway, infra, docs.
+
+### CO-0071 — Flaky Redis cache test in the full suite
+
+**Priority:** P3 · **Difficulty:** Medium · **Module:** Testing · **Level:** 7
+
+**Business context.** A CI run failed once and passed on re-run; the team loses trust in red builds.
+
+**Problem statement.** RedisCacheTests failed once inside the full multi-module run (a thread-pool shutdown error) but passes alone.
+
+**Expected behaviour.** A deterministic test suite: either a root cause fix or a justified isolation.
+
+**Acceptance criteria**
+
+- Reproduce with repeated full runs and record the failure rate
+- Root cause explained with evidence (not 'timing')
+- Fix verified over at least 20 consecutive full runs
+- No test is simply disabled
+
+**Scope.** core-service tests / cache configuration.
+
+### CO-0072 — Outbox relay at scale
+
+**Priority:** P3 · **Difficulty:** Hard · **Module:** Platform · **Level:** 7
+
+**Business context.** The relay publishes one record at a time while holding a database transaction open.
+
+**Problem statement.** Throughput is limited and a slow broker keeps transactions (and row locks) open for seconds.
+
+**Expected behaviour.** A relay design that sustains 1,000 events/s and does not hold locks while waiting for Kafka.
+
+**Acceptance criteria**
+
+- Measure the current maximum events/s and lock hold time
+- Alternative designs compared (batching, claim-then-publish, CDC) with failure modes
+- Ordering per customer preserved or the change explained
+- Chosen design implemented with a load test and outage test
+- Backlog/lag metrics and an alert rule
+
+**Scope.** core-service outbox, metrics, docs.
+
+### CO-0073 — Run the platform on a local Kubernetes cluster
+
+**Priority:** P2 · **Difficulty:** Hard · **Module:** DevOps · **Level:** 7
+
+**Business context.** AWS runs this on ECS today, but most employers ask about Kubernetes.
+
+**Problem statement.** There are no Kubernetes manifests.
+
+**Expected behaviour.** kind/minikube manifests (Deployments, Services, ConfigMaps, Secrets, probes, resource limits, an Ingress) that run the whole platform with rolling updates.
+
+**Acceptance criteria**
+
+- Use readiness/liveness probes backed by the existing actuator endpoints
+- Resource requests/limits that fit the available memory
+- A rolling update and a rollback demonstrated with kubectl
+- Kustomize overlays for dev and staging
+- A README with every command and what to observe
+
+**Scope.** New k8s/ directory, docs.
+
+### CO-0074 — Update the AWS Terraform and CD pipeline for three services
+
+**Priority:** P2 · **Difficulty:** Hard · **Module:** DevOps · **Level:** 7
+
+**Business context.** The Terraform and CD workflow still describe the single-backend topology that existed before extraction.
+
+**Problem statement.** AWS would only run core-service; the gateway, the notification service, Kafka and its database are missing.
+
+**Expected behaviour.** Infrastructure and pipeline that deploy all services: service-to-service discovery, a managed Kafka, per-service databases, per-service rollouts.
+
+**Acceptance criteria**
+
+- Service discovery approach chosen and justified (Cloud Map / Service Connect / ALB paths)
+- Managed Kafka or an explicit alternative with cost estimate
+- Second database created reproducibly (not by hand)
+- CD builds and deploys each service independently and only when its code changed
+- terraform plan is clean; secrets only via Secrets Manager
+- Cost estimate and a destroy procedure documented
+
+**Scope.** infra/terraform, .github/workflows, docs/DEVOPS_AWS.md.
+
+### CO-0075 — Blue/green deployment rehearsal for core-service
+
+**Priority:** P3 · **Difficulty:** Medium · **Module:** DevOps · **Level:** 7
+
+**Business context.** The local deploy script rolls in place; production teams often shift traffic between two versions.
+
+**Problem statement.** There is no way to run two versions of core-service side by side and switch traffic.
+
+**Expected behaviour.** A local blue/green procedure with an instant, verified switch and instant rollback.
+
+**Acceptance criteria**
+
+- Two versions running in Compose with different tags
+- Traffic switch at the gateway (config or route weights) without downtime
+- Database migration compatibility rules written down (expand/contract)
+- Smoke test gates the switch; rollback demonstrated
+
+**Scope.** compose, gateway, scripts/deploy-local.ps1, docs.

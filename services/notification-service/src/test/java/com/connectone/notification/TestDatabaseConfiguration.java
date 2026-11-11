@@ -1,0 +1,24 @@
+package com.connectone.notification;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.flyway.autoconfigure.FlywayMigrationStrategy;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+
+/** Wipes and re-migrates the dedicated test database; refuses to touch anything else. */
+@TestConfiguration
+public class TestDatabaseConfiguration {
+
+    static final String TEST_URL = "jdbc:postgresql://localhost:5434/connectone_notifications_test";
+
+    @Bean
+    FlywayMigrationStrategy cleanThenMigrate(@Value("${spring.datasource.url}") String url) {
+        if (!TEST_URL.equals(url)) {
+            throw new IllegalStateException("Refusing to clean a database other than connectone_notifications_test: " + url);
+        }
+        return flyway -> {
+            flyway.clean();
+            flyway.migrate();
+        };
+    }
+}

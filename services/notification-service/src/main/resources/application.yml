@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: jdbc:postgresql://${CONNECTONE_DB_HOST:localhost}:${CONNECTONE_DB_PORT:5434}/connectone_notifications
+    username: connectone_app
+    password: ${CONNECTONE_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${CONNECTONE_KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest      # a brand-new consumer group reads history from the beginning
+      enable-auto-commit: false
+      properties:
+        max.poll.interval.ms: 300000
+    listener:
+      missing-topics-fatal: false
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${CONNECTONE_NOTIFICATION_PORT:18082}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%X{correlationId:-}] [u=%X{userId:-}] %-30.30logger{29} : %m%n%wEx"
+
+connectone:
+  jwt:
+    secret: ${CONNECTONE_JWT_SECRET:}    # same HS256 secret as core-service (see docs/MICROSERVICES.md for the trade-off)
+  events:
+    topic: connectone.events.v1
+  notification:
+    retry-delay-ms: 60000
+    simulated-failure: false

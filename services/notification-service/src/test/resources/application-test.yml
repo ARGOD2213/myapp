@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5434/connectone_notifications_test
+    username: connectone_app
+    password: ${CONNECTONE_DB_PASSWORD}
+  flyway:
+    clean-disabled: false
+  kafka:
+    listener:
+      auto-startup: false     # the Kafka tests below turn the listener on explicitly with an embedded broker
+
+connectone:
+  jwt:
+    secret: test-only-connectone-jwt-signing-secret-32-bytes-minimum
+  notification:
+    retry-delay-ms: 3600000

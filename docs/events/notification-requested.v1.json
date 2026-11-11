@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "connectone/events/notification-requested.v1",
+  "title": "notification.requested (v1)",
+  "description": "Published by core-service (outbox -> Kafka topic connectone.events.v1, key = customerId, header event-type = notification.requested, header correlation-id). Consumed by notification-service. Delivery is AT-LEAST-ONCE: consumers must be idempotent on (customerId, idempotencyKey). Compatible changes: ADD optional fields. Breaking changes need a new event type or topic version.",
+  "type": "object",
+  "required": ["eventId", "customerId", "type", "message", "idempotencyKey"],
+  "properties": {
+    "eventId": { "type": "string", "description": "UUID of this event instance (differs between publications of the same business event)" },
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "customerId": { "type": "integer", "description": "core-service customer_profile.id (a reference, not a foreign key)" },
+    "userId": { "type": ["integer", "null"], "description": "core-service app_user.id; used by the consumer to authorise 'my notifications'" },
+    "type": { "type": "string", "maxLength": 40, "examples": ["PAYMENT_SUCCEEDED", "RECHARGE_SUCCEEDED", "BOOKING_CONFIRMED", "REFUND_SUCCEEDED"] },
+    "subject": { "type": ["string", "null"], "maxLength": 160 },
+    "message": { "type": "string", "maxLength": 1000 },
+    "idempotencyKey": { "type": "string", "maxLength": 120, "description": "Stable business key, e.g. payment-52933-SUCCEEDED. Duplicate => ignored." }
+  },
+  "additionalProperties": true,
+  "examples": [{
+    "eventId": "8d0e1c34-0000-4000-8000-000000000001", "schemaVersion": 1, "occurredAt": "2026-11-11T10:00:00Z",
+    "customerId": 42, "userId": 1042, "type": "PAYMENT_SUCCEEDED", "subject": "Payment successful",
+    "message": "Payment 7 succeeded.", "idempotencyKey": "payment-7-SUCCEEDED"
+  }]
+}

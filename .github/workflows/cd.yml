@@ -16,7 +16,9 @@ permissions:
 
 jobs:
   build:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Disabled until AWS is configured: set the repository variable ENABLE_CD=true after following docs/DEVOPS_AWS.md.
+    # NOTE: the Terraform/CD below still target the pre-extraction topology (core-service only); see ticket CO-0074.
+    if: ${{ vars.ENABLE_CD == 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
@@ -32,7 +34,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
       - id: meta
         run: echo "image=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_BACKEND_REPO }}:${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
-      - run: docker build -t "${{ steps.meta.outputs.image }}" . && docker push "${{ steps.meta.outputs.image }}"
+      - run: docker build --build-arg SERVICE=core-service --build-arg PORT=18081 -t "${{ steps.meta.outputs.image }}" . && docker push "${{ steps.meta.outputs.image }}"
       - uses: actions/setup-node@v7
         with:
           node-version: "22"

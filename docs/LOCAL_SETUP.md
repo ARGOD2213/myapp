@@ -1,5 +1,9 @@
 # Local setup (Windows 11, PowerShell)
 
+> The multi-service workflow (start everything, compose, deploy rehearsal) is in [LOCAL_ENVIRONMENTS.md](LOCAL_ENVIRONMENTS.md). Use **`scripts\start-all.ps1`** instead of
+> `start-backend.ps1` (which now starts only core-service on **18081**; the gateway is the public entry on **18080**). `connectone_notifications(_test)` databases and the
+> `connectone-kafka` container are created by `scripts\dev-infra.ps1`.
+
 Everything below was run on the machine this project was built on. Secrets are **never** printed or committed; scripts read
 them from Windows *user* environment variables.
 

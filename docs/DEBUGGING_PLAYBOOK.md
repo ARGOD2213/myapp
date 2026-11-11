@@ -88,8 +88,25 @@ Fresh-start check: drop/recreate `connectone_dev` (LOCAL_SETUP.md §6) and boot.
 `docker stop connectone-redis` while the API runs with `CONNECTONE_CACHE_TYPE=redis`: API keeps working (fail-open), logs `event=cache_error op=get cache=recharge-plans cause=RedisConnectionFailureException`, `/actuator/health` stays UP with `cache.redis = unreachable…` (admin view). Latency rises by ~300 ms/request to the cached endpoint (connect timeout, no circuit breaker).
 Inspect: `docker exec connectone-redis redis-cli -n 0 --scan --pattern "connectone:*"` · `ttl <key>` · `flushdb` (dev only; **not** on 6379, which isn't ours).
 
-## 10. Kafka consumer failures
-Not applicable — Kafka is not part of ConnectOne (see KNOWN_LIMITATIONS.md for why). The equivalent for the notification queue: `select status, count(*), max(attempt_count) from notification_record group by 1;` and `select id, last_error, next_attempt_at from notification_record where status='FAILED' order by id desc limit 20;`, retry via `POST /admin/notifications/retry`.
+## 10. Kafka and event-pipeline failures
+Pipeline: core-service `outbox_event` -> relay -> topic `connectone.events.v1` -> notification-service consumer -> `connectone_notifications.notification_record`.
+**Windows gotcha:** Git Bash rewrites `/opt/...` paths; run these from PowerShell, or prefix with `MSYS_NO_PATHCONV=1`.
+```powershell
+$k = "docker exec connectone-kafka /opt/kafka/bin"
+iex "$k/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic connectone.events.v1"      # partitions, leaders
+iex "$k/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group notification-service"   # LAG per partition (0 = caught up)
+iex "$k/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic connectone.events.v1 --from-beginning --max-messages 3 --property print.headers=true --property print.key=true"
+iex "$k/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic connectone.events.v1.DLT --from-beginning --timeout-ms 5000"   # parked (poison) messages
+```
+| Symptom | Likely cause | Check |
+|---|---|---|
+| Payment OK but no notification | event stuck in the outbox (Kafka down / relay degraded) | admin dashboard "events waiting in the outbox"; `select count(*) from outbox_event where published_at is null` (core DB); log `event=outbox_relay_degraded` |
+| Event published but no notification | consumer down, lagging or failing | consumer group LAG; notification-service log `event=notification_consumed`; its `/actuator/health` |
+| Notification missing for one customer only | record on the DLT, or `idempotencyKey` collision (duplicate = ignored by design) | DLT consumer; `select * from notification_record where customer_id = ?` |
+| Duplicates impossible but "result=duplicate" in logs | normal at-least-once redelivery | metric `connectone.notification.events{result=duplicate}` |
+| Consumer repeatedly failing | poison payload (retried 3x: 1s, 2s, 4s, then DLT) or database down | log stack trace + DLT |
+Replaying parked messages: consume the DLT, fix the cause, re-publish the payloads to `connectone.events.v1` with header `event-type: notification.requested` (idempotent, so replays are safe). Follow one request across services: `Select-String logs\*.log -Pattern "<correlation id>"`.
+Drill: `docker stop connectone-kafka` -> pay in the UI -> payment succeeds, outbox backlog rises -> `docker start connectone-kafka` -> backlog drains (measured: ~17 s).
 
 ## 11. Failed payments
 ```sql

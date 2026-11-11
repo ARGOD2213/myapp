@@ -1,7 +1,17 @@
-# Full local stack in containers:  docker compose up --build
-# Needs CONNECTONE_DB_PASSWORD in your shell or a local .env (never committed).
-# (Day-to-day development normally uses scripts/start-backend.ps1 + npm run dev against the dedicated containers.)
-name: connectone-stack
+# Whole platform in containers (a local "fake deployment"):
+#   docker compose up -d --build                      -> app on http://localhost:8081  (gateway http://localhost:18090)
+#   docker compose --profile observability up -d      -> + Prometheus :9090 and Grafana :3000 (admin / admin)
+# Needs CONNECTONE_DB_PASSWORD in your shell (never committed). Docker Desktop needs >= 4 GB RAM for the full stack incl. observability
+# (WSL2: %USERPROFILE%\.wslconfig  memory=5GB); the core stack alone fits in ~3 GB.
+# Day-to-day development uses scripts\start-all.ps1 (JVMs on the host) instead; this file is for deploy rehearsals.
+name: connectone
+x-java: &java
+  restart: unless-stopped
+  environment: &java-env
+    CONNECTONE_DB_PASSWORD: ${CONNECTONE_DB_PASSWORD:?set CONNECTONE_DB_PASSWORD}
+    CONNECTONE_JWT_SECRET: ${CONNECTONE_JWT_SECRET:-local-compose-only-secret-change-me-32-chars}
+    CONNECTONE_KAFKA_BOOTSTRAP: kafka:9092
+
 services:
   postgres:
     image: postgres:17
@@ -9,30 +19,126 @@ services:
       POSTGRES_DB: connectone_dev
       POSTGRES_USER: connectone_app
       POSTGRES_PASSWORD: ${CONNECTONE_DB_PASSWORD:?set CONNECTONE_DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
     ports: ["127.0.0.1:5435:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U connectone_app -d connectone_dev"]
       interval: 5s
-      retries: 10
+      retries: 12
+
+  kafka:
+    image: apache/kafka:3.9.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_HEAP_OPTS: -Xmx256m -Xms256m
+    volumes: [kafkadata:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 8s
+      retries: 15
+      start_period: 15s
+
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
-  backend:
-    build: .
+    command: ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "allkeys-lru"]
+
+  core-service:
+    <<: *java
+    build: { context: ., args: { SERVICE: core-service, PORT: "18081" } }
+    image: connectone/core-service:${TAG:-local}
     depends_on:
       postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/connectone_dev
-      CONNECTONE_DB_PASSWORD: ${CONNECTONE_DB_PASSWORD}
-      CONNECTONE_JWT_SECRET: ${CONNECTONE_JWT_SECRET:-local-compose-only-secret-change-me-32-chars}
+      <<: *java-env
+      SPRING_DATASOURCE_URL: ${CORE_DB_URL:-jdbc:postgresql://postgres:5432/connectone_dev}
       CONNECTONE_CACHE_TYPE: redis
       CONNECTONE_REDIS_HOST: redis
       CONNECTONE_REDIS_PORT: "6379"
-    ports: ["127.0.0.1:18081:18080"]
+      JAVA_TOOL_OPTIONS: -Xmx320m -Duser.timezone=UTC
+    ports: ["127.0.0.1:18091:18081"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:18081/actuator/health/readiness || exit 1"]
+      interval: 10s
+      retries: 30
+      start_period: 120s
+
+  notification-service:
+    <<: *java
+    build: { context: ., args: { SERVICE: notification-service, PORT: "18082" } }
+    image: connectone/notification-service:${TAG:-local}
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    environment:
+      <<: *java-env
+      SPRING_DATASOURCE_URL: ${NOTIFICATION_DB_URL:-jdbc:postgresql://postgres:5432/connectone_notifications}
+      JAVA_TOOL_OPTIONS: -Xmx160m -Duser.timezone=UTC
+    ports: ["127.0.0.1:18092:18082"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:18082/actuator/health/readiness || exit 1"]
+      interval: 10s
+      retries: 30
+      start_period: 90s
+
+  api-gateway:
+    restart: unless-stopped
+    build: { context: ., args: { SERVICE: api-gateway, PORT: "18080" } }
+    image: connectone/api-gateway:${TAG:-local}
+    depends_on:
+      core-service: { condition: service_healthy }
+      notification-service: { condition: service_healthy }
+    environment:
+      CORE_SERVICE_URL: http://core-service:18081
+      NOTIFICATION_SERVICE_URL: http://notification-service:18082
+      JAVA_TOOL_OPTIONS: -Xmx128m -Duser.timezone=UTC
+    ports: ["127.0.0.1:18090:18080"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:18089/actuator/health/readiness || exit 1"]
+      interval: 10s
+      retries: 20
+      start_period: 60s
+
   frontend:
     build: ./frontend
-    depends_on: [backend]
+    image: connectone/frontend:${TAG:-local}
+    environment:
+      API_UPSTREAM: http://api-gateway:18080
+    depends_on:
+      api-gateway: { condition: service_healthy }
     ports: ["127.0.0.1:8081:80"]
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v2.55.1
+    volumes: ["./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
+    ports: ["127.0.0.1:9090:9090"]
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+    ports: ["127.0.0.1:3000:3000"]
+
 volumes:
   pgdata:
+  kafkadata:

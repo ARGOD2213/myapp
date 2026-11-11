@@ -1,0 +1,24 @@
+{
+  "title": "ConnectOne platform",
+  "uid": "connectone-platform",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    { "id": 1, "type": "timeseries", "title": "HTTP requests / s by service", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (job) (rate(http_server_requests_seconds_count[1m]))", "legendFormat": "{{job}}" }] },
+    { "id": 2, "type": "timeseries", "title": "p95 latency (s) by service", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, job) (rate(http_server_requests_seconds_bucket[1m])))", "legendFormat": "{{job}}" }] },
+    { "id": 3, "type": "stat", "title": "Outbox events waiting (core-service)", "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+      "targets": [{ "expr": "connectone_outbox_pending" }] },
+    { "id": 4, "type": "timeseries", "title": "Notification events consumed (stored vs duplicate)", "gridPos": { "x": 6, "y": 8, "w": 9, "h": 6 },
+      "targets": [{ "expr": "sum by (result) (rate(connectone_notification_events_total[1m]))", "legendFormat": "{{result}}" }] },
+    { "id": 5, "type": "timeseries", "title": "Payments confirmed / s by outcome", "gridPos": { "x": 15, "y": 8, "w": 9, "h": 6 },
+      "targets": [{ "expr": "sum by (outcome) (rate(connectone_payment_confirmed_total[1m]))", "legendFormat": "{{outcome}}" }] },
+    { "id": 6, "type": "timeseries", "title": "DB connections active / pending", "gridPos": { "x": 0, "y": 14, "w": 12, "h": 7 },
+      "targets": [{ "expr": "hikaricp_connections_active", "legendFormat": "active {{job}}" }, { "expr": "hikaricp_connections_pending", "legendFormat": "pending {{job}}" }] },
+    { "id": 7, "type": "timeseries", "title": "JVM heap used (bytes)", "gridPos": { "x": 12, "y": 14, "w": 12, "h": 7 },
+      "targets": [{ "expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "{{job}}" }] }
+  ]
+}

@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          http-client:
+            connect-timeout: 2s
+            read-timeout: 15s
+          # Routes are matched top to bottom: specific paths first, then the catch-all.
+          # Service discovery is intentionally static (env vars). In Docker Compose and Kubernetes the platform's DNS
+          # (http://core-service:18081) is the discovery mechanism; see docs/MICROSERVICES.md for when Eureka/Consul is worth it.
+          routes:
+            - id: notification-service
+              uri: ${NOTIFICATION_SERVICE_URL:http://localhost:18082}
+              predicates:
+                - Path=/api/v1/notifications/**,/api/v1/admin/notification-deliveries,/api/v1/admin/notifications/**
+            - id: core-service
+              uri: ${CORE_SERVICE_URL:http://localhost:18081}
+              predicates:
+                - Path=/api/**
+
+server:
+  port: ${CONNECTONE_GATEWAY_PORT:18080}
+  shutdown: graceful
+
+management:
+  server:
+    # Actuator lives on its own port that is never published or routed: the gateway has no authentication of its own,
+    # so metrics/gateway-routes must not be reachable on the public port.
+    port: ${CONNECTONE_GATEWAY_MGMT_PORT:18089}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%X{correlationId:-}] %-30.30logger{29} : %m%n%wEx"

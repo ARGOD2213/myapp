@@ -25,6 +25,8 @@ function Breakdown({ title, rows, to }: { title: string; rows: Row[]; to?: strin
 
 export function AdminDashboard() {
   const dash = useFetch(() => api<Row>('/admin/dashboard'));
+  // notifications are owned by notification-service (own database): the gateway routes this call there
+  const notes = useFetch(() => api<Row[]>('/admin/notifications/summary'));
   return (
     <>
       <PageHeader title="Operations dashboard" subtitle="Live figures from the ConnectOne database." actions={<button className="btn" onClick={dash.reload}>Refresh</button>} />
@@ -37,14 +39,15 @@ export function AdminDashboard() {
               <Stat label="Refunded, last 30 days" value={formatMoney(d.refundedLast30Days)} />
               <Stat label="Payments needing reconciliation" value={d.paymentsNeedingReconciliation} tone={d.paymentsNeedingReconciliation > 0 ? 'bad' : 'good'} />
               <Stat label="Tickets stuck in progress > 14 days" value={d.staleInProgressTickets} tone={d.staleInProgressTickets > 0 ? 'warn' : 'good'} />
-              <Stat label="Failed notifications" value={get(d.notificationsByStatus, 'FAILED').toLocaleString()} tone="warn" />
+              <Stat label="Failed notifications" value={notes.data ? get(notes.data, 'FAILED').toLocaleString() : '...'} tone="warn" />
+              <Stat label="Events waiting in the outbox" value={d.outboxPending} tone={d.outboxPending > 100 ? 'bad' : 'good'} />
               <Stat label="Upcoming confirmed bookings" value={d.upcomingBookings.toLocaleString()} />
             </div>
             <div className="grid" style={{ marginTop: '1rem' }}>
               <Breakdown title="Payments (last 24h)" rows={d.paymentsLast24h} to="/admin/payments" />
               <Breakdown title="Subscriptions" rows={d.subscriptionsByStatus} />
               <Breakdown title="Support tickets" rows={d.ticketsByStatus} to="/admin/tickets" />
-              <Breakdown title="Notifications" rows={d.notificationsByStatus} />
+              <Breakdown title="Notifications (notification-service)" rows={notes.data ?? []} />
               <Breakdown title="Customers" rows={d.customersByStatus} to="/admin/customers" />
             </div>
           </>

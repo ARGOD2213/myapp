@@ -1,5 +1,9 @@
 # DevOps and AWS deployment
 
+> **Status:** CI covers all services (matrix of image builds). The **Terraform and CD below still describe the single-backend topology** that existed before the notification
+> service and gateway were extracted; CD is disabled until `ENABLE_CD=true`. Bringing AWS up to date (service discovery, managed Kafka, per-service databases) is ticket **CO-0074**.
+> The local equivalents (Compose, `scripts\deploy-local.ps1`) are current: [LOCAL_ENVIRONMENTS.md](LOCAL_ENVIRONMENTS.md).
+
 This describes the delivery pipeline and the AWS target. **What is verified locally:** both Docker images build, the whole stack runs with
 `docker compose up` (Flyway migrates, nginx proxies `/api`, SPA routes work), the Terraform configuration passes `terraform validate`, and the CI steps
 are the same commands used locally. **What is not verified:** the GitHub Actions run, `terraform apply`, and the ECS/CloudFront deployment — they need your

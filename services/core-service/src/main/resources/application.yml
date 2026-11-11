@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: connectone
+  datasource:
+    url: jdbc:postgresql://localhost:5434/connectone_dev
+    driver-class-name: org.postgresql.Driver
+    username: connectone_app
+    password: ${CONNECTONE_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      pool-name: connectone-pool
+      connection-timeout: 5000
+      leak-detection-threshold: 20000
+  cache:
+    type: ${CONNECTONE_CACHE_TYPE:none}   # 'redis' enables the catalogue cache; 'none' (default) needs no Redis
+    redis:
+      time-to-live: 5m
+      key-prefix: "connectone:"
+      use-key-prefix: true
+  kafka:
+    bootstrap-servers: ${CONNECTONE_KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 3000          # Kafka down => fail fast; outbox rows just wait
+        delivery.timeout.ms: 5000
+        request.timeout.ms: 3000
+  data:
+    redis:
+      host: ${CONNECTONE_REDIS_HOST:localhost}
+      port: ${CONNECTONE_REDIS_PORT:6380}
+      timeout: 300ms
+      connect-timeout: 300ms
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${CONNECTONE_PORT:18081}
+  shutdown: graceful
+  forward-headers-strategy: framework   # behind an AWS ALB/nginx
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,loggers,threaddump,flyway,prometheus
+  health:
+    redis:
+      enabled: false   # replaced by the fail-open 'cache' indicator (see CacheConfiguration)
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+      roles: ADMIN
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%X{correlationId:-}] [u=%X{userId:-}] %-30.30logger{29} : %m%n%wEx"
+  level:
+    com.connectone: INFO
+    connectone.access: INFO
+    connectone.audit: INFO
+
+connectone:
+  events:
+    topic: connectone.events.v1
+  outbox:
+    relay:
+      enabled: ${CONNECTONE_OUTBOX_RELAY:true}
+      interval-ms: 500
+  jwt:
+    secret: ${CONNECTONE_JWT_SECRET:}
+  otp:
+    expose-code: true
+  seed:
+    enabled: ${CONNECTONE_SEED_ENABLED:false}
+    password: ${CONNECTONE_SEED_PASSWORD:}

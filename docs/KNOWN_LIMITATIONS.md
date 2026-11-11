@@ -14,14 +14,20 @@ Honest list of what is simulated, missing, or deliberately imperfect. Nothing he
 
 ## Not implemented
 
-- **Kafka.** Deliberately not added. The only asynchronous workflow (notifications) already has a transactional, idempotent,
-  retrying queue in PostgreSQL (`notification_record`, `next_attempt_at`, retry job). A broker would add an operational
-  component with no capability the system lacks, and a Kafka that cannot be tested reliably here would be decorative.
-  Revisit when a second consumer of payment events appears (analytics, fraud) — see ticket CO-0062.
+- **Remaining monolith.** Only notifications have been extracted (docs/MICROSERVICES.md). Payments, booking, subscriptions, support, streaming and identity still live in core-service and share one database.
 - **Automatic subscription renewal charging.** `autoRenew` is stored; nothing charges it. Expiry and reminders run in one instance only.
 - Password reset / account recovery, e-mail verification, privacy/deletion flows, MFA, rate limiting on public endpoints.
 - Multi-instance safety for `SubscriptionExpiryJob` and the notification retry job (the payment-expiry job uses `SKIP LOCKED`).
 - Real hosting for video, partner booking inventory, tax/invoicing, multi-currency (INR only).
+
+## Microservices (current state)
+- **Kafka** (KRaft, single broker, replication factor 1) is used only for domain events from core to notification-service; no TLS/auth, no schema registry (the contract is `docs/events/*.json` + contract tests).
+- **Gateway** has no rate limiting, circuit breaker or authentication of its own (tickets CO-0066, CO-0067); it runs on Boot 4.0.9 because Spring Cloud for Boot 4.1 is only a release candidate.
+- **notification-service** verifies JWT signature and expiry only; a token revoked at logout stays valid there until expiry (<= 15 min) (CO-0070).
+- **Outbox relay** publishes one record at a time inside a DB transaction; the failure mode is documented and measured (CO-0072).
+- **AWS Terraform and the CD workflow describe the pre-extraction topology** (core only). CD is disabled until `ENABLE_CD=true` (CO-0074). Compose, `deploy-local.ps1` and CI cover all services.
+- A Redis cache test failed once inside a full multi-module run and passed on re-run (CO-0071); not reproduced in 3 later full runs.
+- Docker Desktop is limited to 2 GB by `.wslconfig`: the compose stack fits without observability but cold starts are slow (core-service took 335 s once under contention, ~57 s on an idle VM).
 
 ## Redis
 

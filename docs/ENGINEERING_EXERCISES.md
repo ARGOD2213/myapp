@@ -11,6 +11,7 @@ The backlog lives in [`tickets/JIRA_BACKLOG.md`](tickets/JIRA_BACKLOG.md) (human
 | 4 | Feature development | CO-0039–0050 | 1–3 days | API + DB (+UI) + tests + docs |
 | 5 | Performance & reliability | CO-0051–0058 | 1–3 days | measurements before/after, migration, tests |
 | 6 | Module ownership | CO-0059–0064 | 3–5 days | design note, cross-layer delivery, incident drill |
+| 7 | Microservices, platform and DevOps | CO-0065–0075 | 2–5 days | design notes, new services, gateway/Kafka/Kubernetes/AWS work |
 
 Every ticket has: ID, title, priority, difficulty, module, business context, problem statement, expected behaviour, acceptance
 criteria, scope. Root causes and solutions are **never** in a ticket; `_ANSWER_KEY.md` (kept separately) is for after your attempt.

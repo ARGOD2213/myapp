@@ -25,3 +25,5 @@ frontend/dist/
 frontend/node_modules/
 .github/modernize/
 *.tsbuildinfo
+logs/
+.deploy/

@@ -1,5 +1,9 @@
 # Architecture
 
+> **Update:** the platform is being decomposed into services (strangler-fig). The sections below describe **core-service**, which is still a modular monolith
+> internally. For the service topology, Kafka/outbox, gateway and the concept map see [MICROSERVICES.md](MICROSERVICES.md). Notifications are no longer part of core:
+> `NotificationService` only writes an outbox event; `notification-service` owns storage and delivery.
+
 ## Style: modular monolith, JDBC-first
 
 One deployable Spring Boot application (Java 25, Spring Boot 4.1.2). Modules are packages under `com.connectone`:

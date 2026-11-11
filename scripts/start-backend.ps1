@@ -12,7 +12,7 @@ if (-not $env:CONNECTONE_JWT_SECRET) {
 if (-not $env:CONNECTONE_JWT_SECRET) {
     # Dev-only: random per-run secret; tokens become invalid after restart.
     $bytes = New-Object byte[] 48
-    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
     $env:CONNECTONE_JWT_SECRET = [Convert]::ToBase64String($bytes)
 }
 $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue

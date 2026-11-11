@@ -26,3 +26,5 @@ try {
     Get-Content "$here\dataset\verify_dataset.sql" -Raw |
         docker exec -i $container sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q'
 } finally { Remove-Item Env:SEED_PW -ErrorAction SilentlyContinue }
+# notifications belong to notification-service: copy the generated rows into its own database
+& "$here\migrate-notifications.ps1"

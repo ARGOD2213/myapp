@@ -1,0 +1,79 @@
+# VS Code extension "REST Client" (humao.rest-client): click "Send Request" above any request.
+# Everything goes through the gateway. Create api-tests/.env or use "REST Client: Switch Environment" -> add in settings:
+#   "rest-client.environmentVariables": { "local": { "base": "http://localhost:18080", "password": "<your seed password>" } }
+# Never commit your password.
+
+@base = {{$dotenv base}}
+
+### 1. Login as a customer (copy accessToken into the variable below)
+POST {{base}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "cust00001@connectone.test", "password": "{{$dotenv password}}" }
+
+###
+@token = PASTE_ACCESS_TOKEN_HERE
+@adminToken = PASTE_ADMIN_ACCESS_TOKEN_HERE
+
+### 2. Public: recharge plans (cached when Redis is on)
+GET {{base}}/api/v1/recharge-plans
+
+### 3. My profile / numbers / payments
+GET {{base}}/api/v1/customers/me
+Authorization: Bearer {{token}}
+
+###
+GET {{base}}/api/v1/mobile-numbers
+Authorization: Bearer {{token}}
+
+###
+GET {{base}}/api/v1/payments/me
+Authorization: Bearer {{token}}
+
+### 4. Start a recharge (idempotencyKey must be unique per attempt; reuse it to see idempotency)
+POST {{base}}/api/v1/recharges
+Authorization: Bearer {{token}}
+Content-Type: application/json
+X-Correlation-Id: manual-test-0001
+
+{ "mobileNumberId": 1, "planId": 2, "idempotencyKey": "manual-recharge-0001" }
+
+### 5. Confirm the payment (use the paymentId from step 4). Repeat with the same callbackId: applied once.
+POST {{base}}/api/v1/payments/PAYMENT_ID/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "callbackId": "manual-callback-0001", "outcome": "SUCCEEDED" }
+
+### 6. Notifications - served by notification-service through the gateway (appears ~1-2 s after step 5)
+GET {{base}}/api/v1/notifications/me
+Authorization: Bearer {{token}}
+
+### 7. Admin: dashboard, payments needing reconciliation, notification deliveries (notification-service)
+GET {{base}}/api/v1/admin/dashboard
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{base}}/api/v1/admin/payments?reconciliation=RECONCILIATION_REQUIRED&size=5
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{base}}/api/v1/admin/notification-deliveries?status=FAILED&size=5
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{base}}/api/v1/admin/notifications/summary
+Authorization: Bearer {{adminToken}}
+
+### 8. Negative tests
+# no token -> 401
+GET {{base}}/api/v1/notifications/me
+
+###
+# customer on an admin API -> 403
+GET {{base}}/api/v1/admin/dashboard
+Authorization: Bearer {{token}}
+
+###
+# actuator must not be reachable through the gateway -> 404
+GET {{base}}/actuator/metrics

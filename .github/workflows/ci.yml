@@ -71,20 +71,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { service: core-service, context: ., args: "SERVICE=core-service
-PORT=18081" }
-          - { service: notification-service, context: ., args: "SERVICE=notification-service
-PORT=18082" }
-          - { service: api-gateway, context: ., args: "SERVICE=api-gateway
-PORT=18080" }
-          - { service: frontend, context: frontend, args: "" }
+          - { service: core-service, context: ., port: "18081" }
+          - { service: notification-service, context: ., port: "18082" }
+          - { service: api-gateway, context: ., port: "18080" }
+          - { service: frontend, context: frontend, port: "80" }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
-          build-args: ${{ matrix.args }}
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            PORT=${{ matrix.port }}
           push: false
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}

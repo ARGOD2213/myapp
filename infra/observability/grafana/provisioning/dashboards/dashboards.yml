@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: ConnectOne
+    folder: ConnectOne
+    type: file
+    options: { path: /var/lib/grafana/dashboards }
